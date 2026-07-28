@@ -59,6 +59,14 @@ An example of a PGlite extension that augments the PGlite instance is the [live 
 
 ## Building Postgres Extensions
 
+::: warning
+This fork's Postgres submodule ([postgres-pglite](https://github.com/gaarutyunov/postgres-pglite), branch `REL_19_BETA2-pglite`) is **core-only**. The `pglite/other_extensions` tree has been removed, so out-of-tree extensions can no longer be built here, and the nine external extension bundles (`postgis`, `pg_textsearch`, `age`, `pg_hashids`, `pg_ivm`, `pgtap`, `pg_uuidv7`, `pgvector`, `pgmq`) are no longer produced or copied by `pnpm wasm:build`. The corresponding `packages/pglite-<ext>` packages are still in the tree for the docs site and the REPL, but they are excluded from `pnpm ts:build`.
+
+In-tree `contrib` extensions are unaffected — they are still built by the Postgres build and shipped in `packages/pglite/release`.
+
+The "Backend" section below therefore does not apply to this fork; it is kept for reference against upstream PGlite.
+:::
+
 In PGlite, every Postgres extension consists of two parts: a **backend** part, and a **frontend** part. The backend part is its core code. The frontend part is the `typescript/javascript` code that interacts with PGlite.
 
 ### Happy path
@@ -80,6 +88,10 @@ $ git checkout -b myghname/myawesomeextension
 ```
 
 #### Backend
+
+::: danger Not available in this fork
+`postgres-pglite/pglite/other_extensions` no longer exists on `REL_19_BETA2-pglite` — this fork builds core Postgres and its in-tree `contrib` extensions only. The steps in this subsection cannot be followed as written. Adding an out-of-tree extension would first mean restoring the `other_extensions` build in the Postgres fork.
+:::
 
 PGlite's backend code is in the repo [postgres-pglite](https://github.com/electric-sql/postgres-pglite) and is downloaded as a submodule dependency of the main repo. You will add your extension's code as a new submodule dependency:
 
