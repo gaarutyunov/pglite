@@ -1,0 +1,88 @@
+# Fork-rot check.
+#
+# This fork carries a PG19 + SQL/PGQ Postgres and exists only as a docs/demo
+# artifact, with no CI conformance role (Decision 5). The accepted risk is that
+# the browser build rots silently between rebases. This workflow is the
+# detector.
+#
+# It rebuilds from scratch and then *boots* the result and runs a real
+# GRAPH_TABLE query. The boot is the point, not the build: this fork has
+# already shipped a defect (`PostgresMain` calling an undefined
+# `pgl_sigsetjmp`) that survived a green wasm32 compile, ten green native CI
+# legs and a `build-pglite.sh` that exited 0, and only surfaced when something
+# called `new PGlite()`. A rebuild that only checks the exit code is exactly
+# the check that already passed while the artifact was broken.
+#
+# Monthly, because a rebuild costs 30-50 minutes of runner time and the fork
+# only moves on rebases.
+name: Fork rot check
+
+on:
+  schedule:
+    # 04:17 UTC on the 1st of each month. Off the hour to avoid the cron rush,
+    # which GitHub drops scheduled runs into.
+    - cron: '17 4 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-rot-check
+  cancel-in-progress: false
+
+jobs:
+  rebuild-and-smoke:
+    name: Rebuild the wasm artifact and run the SQL/PGQ smoke test
+    # Deliberately a GitHub-hosted runner. build_and_test.yml targets
+    # blacksmith-* labels inherited from upstream; this fork has no Blacksmith
+    # runners, so a job using those labels would queue forever here.
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      BUILD_CONFIG_FILE: postgres-pglite/.buildconfig
+      TZ: UTC
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      # The wasm build unpacks a large Docker image plus a full Postgres tree.
+      - name: Reclaim runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc || true
+          df -h /
+
+      - uses: pnpm/action-setup@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: pnpm
+
+      # Not --frozen-lockfile: matches build_and_test.yml's build-all job, the
+      # only job upstream runs `pnpm build:all` from.
+      - name: Install
+        run: pnpm install
+
+      # build:all:ci is build:all with the wasm build throttled --- see the
+      # root package.json. build-pglite.sh runs `emmake make -j` with no job
+      # limit, which a 4-vCPU / 16 GB hosted runner cannot survive.
+      - name: Rebuild wasm and TypeScript packages
+        env:
+          PGSRC: ${{ github.workspace }}/postgres-pglite
+        run: pnpm build:all:ci
+
+      # The actual detector. Boots packages/pglite/dist and runs a
+      # CREATE PROPERTY GRAPH + GRAPH_TABLE workload against it.
+      - name: SQL/PGQ smoke test
+        run: pnpm -C packages/pglite test:pgq
+
+      - name: Report
+        if: failure()
+        run: |
+          echo "### Fork rot check failed" >>"$GITHUB_STEP_SUMMARY"
+          echo "" >>"$GITHUB_STEP_SUMMARY"
+          echo "The PG19 fork no longer rebuilds and boots cleanly." >>"$GITHUB_STEP_SUMMARY"
+          echo "Reproduce locally with \`pnpm build:all\` then" >>"$GITHUB_STEP_SUMMARY"
+          echo "\`pnpm -C packages/pglite test:pgq\`." >>"$GITHUB_STEP_SUMMARY"

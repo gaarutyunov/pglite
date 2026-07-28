@@ -87,7 +87,8 @@ The build itself needs Docker and takes ~30–50 minutes; consumers never build.
 
 - **From CI:** run the [Publish PG19 build](.github/workflows/publish-pg19-release.yml)
   workflow (`workflow_dispatch`) with the next build number. It builds
-  `pnpm build:all` on a GitHub-hosted runner, packs, and creates the release.
+  `pnpm build:all:ci` on a GitHub-hosted runner, runs the SQL/PGQ smoke test
+  against the result, packs, and creates the release.
   It deliberately does **not** use the `blacksmith-*` runner labels that
   `build_and_test.yml` inherits from upstream — this fork has no Blacksmith runners.
 - **From a local build:** once `pnpm build:all` has populated
@@ -101,6 +102,38 @@ The build itself needs Docker and takes ~30–50 minutes; consumers never build.
 
 `scripts/pack-pg19-release.sh` packs in a staging directory and never modifies the
 checked-in `packages/pglite/package.json`.
+
+`build:all:ci` is `build:all` with the wasm build throttled: `build-pglite.sh` runs
+`emmake make -j` with no job limit, which a 4-vCPU / 16 GB hosted runner cannot
+survive. Set `PGLITE_BUILD_LOAD` to override the load cap. Use plain `build:all`
+locally.
+
+### Detecting fork rot
+
+The fork has no CI conformance role, so the browser build can rot silently between
+rebases. Two things catch that:
+
+- **`packages/pglite/tests/graph-table.test.ts`** — the only test that exercises the
+  feature this fork exists for. It boots the **built** artifact (`packages/pglite/dist`,
+  not `src`), runs `CREATE PROPERTY GRAPH` and a set of `GRAPH_TABLE (... MATCH ...)`
+  queries, and asserts on the returned rows. Run it by hand once a build exists:
+
+  ```bash
+  pnpm -C packages/pglite test:pgq
+  ```
+
+  It takes seconds and needs no Docker.
+
+- **[Fork rot check](.github/workflows/fork-rot-check.yml)** — monthly (and on
+  `workflow_dispatch`), rebuilds from scratch on a GitHub-hosted runner and then runs
+  that same test against the fresh artifact.
+
+The boot is the detector, not the build. This fork has already shipped a defect
+(`PostgresMain` calling an undefined `pgl_sigsetjmp`) that survived a green wasm32
+compile, ten green native CI legs and a `build-pglite.sh` that exited 0, and only
+surfaced when something called `new PGlite()`. A scheduled rebuild that checks the
+exit code alone is precisely the check that already passed while the artifact was
+broken.
 
 ### Why a GitHub Release
 
