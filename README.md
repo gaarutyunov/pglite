@@ -33,6 +33,94 @@
 
 ![PGlite](https://raw.githubusercontent.com/electric-sql/pglite/main/screenshot.png)
 
+## PG19 fork builds
+
+> This is [`gaarutyunov/pglite`](https://github.com/gaarutyunov/pglite), a fork of
+> [`electric-sql/pglite`](https://github.com/electric-sql/pglite) whose `postgres-pglite`
+> submodule points at a **PostgreSQL 19** tree carrying SQL/PGQ. Everything below this
+> section is upstream's documentation and still applies.
+
+Builds of this fork are **not** published to any registry. They are published as
+[GitHub Releases on this repository](https://github.com/gaarutyunov/pglite/releases),
+each carrying an `npm pack` tarball of `packages/pglite`:
+
+| asset | what it is |
+| --- | --- |
+| `electric-sql-pglite-<version>.tgz` | installable npm package tarball |
+| `SHA256SUMS` | checksum of the tarball |
+| `build-info.txt` | the pglite and postgres-pglite commits it was built from, and the Postgres version read out of the shipped `pglite.wasm` |
+
+Fork builds are versioned `<upstream version>-pg19.<build number>` (e.g. `0.5.4-pg19.1`)
+and tagged `pglite-v<that version>`, so an installed copy self-identifies as a fork
+build. The package **name** inside the tarball is unchanged, so consumers keep
+importing `@electric-sql/pglite`.
+
+### Consuming a build
+
+Install the release asset as a URL dependency — no registry, no credentials, plain
+HTTPS from a public repository:
+
+```bash
+npm install https://github.com/gaarutyunov/pglite/releases/download/pglite-v0.5.4-pg19.1/electric-sql-pglite-0.5.4-pg19.1.tgz
+```
+
+```js
+import { PGlite } from '@electric-sql/pglite'
+
+const db = new PGlite()
+await db.query('select version()')
+// -> PostgreSQL 19beta2 on wasm32-unknown-linux-gnu ... 32-bit
+```
+
+The tarball has no runtime dependencies, so this pulls exactly one package.
+
+**How it is pinned.** `npm install` writes both the resolved URL and a `sha512`
+integrity hash into `package-lock.json`; `npm ci` then reproduces exactly those bytes
+on every build and fails with `EINTEGRITY` if the asset ever differs. Never point a
+consumer at a moving `latest` — every build gets its own immutable tag, and assets are
+not replaced in place. pnpm and yarn record the same URL and integrity for URL
+dependencies.
+
+### Cutting a build
+
+The build itself needs Docker and takes ~30–50 minutes; consumers never build.
+
+- **From CI:** run the [Publish PG19 build](.github/workflows/publish-pg19-release.yml)
+  workflow (`workflow_dispatch`) with the next build number. It builds
+  `pnpm build:all` on a GitHub-hosted runner, packs, and creates the release.
+  It deliberately does **not** use the `blacksmith-*` runner labels that
+  `build_and_test.yml` inherits from upstream — this fork has no Blacksmith runners.
+- **From a local build:** once `pnpm build:all` has populated
+  `packages/pglite/dist`, run
+
+  ```bash
+  scripts/pack-pg19-release.sh <build-number>
+  gh release create pglite-v<version> --prerelease --target <commit> \
+    release-dist/*.tgz release-dist/SHA256SUMS release-dist/build-info.txt
+  ```
+
+`scripts/pack-pg19-release.sh` packs in a staging directory and never modifies the
+checked-in `packages/pglite/package.json`.
+
+### Why a GitHub Release
+
+The binding constraint is that a downstream Pages workflow must be able to fetch the
+build **without credentials**. That ruled out the alternatives:
+
+- **npmjs.com** — publishing a fork to a public registry is an outward-facing act
+  needing credentials this repo does not have, and would mean renaming the package.
+- **GitHub Packages (`npm.pkg.github.com`)** — its npm registry requires a token for
+  *all* reads: "You need an access token to publish, install, and delete private,
+  internal, and public packages." A consumer repo's `GITHUB_TOKEN` has no read access
+  to a package owned by a different repository without the owner explicitly granting
+  it, so this fails the no-authentication constraint.
+- **Committing build artifacts** — ~17 MB of `release/` (23 MB unpacked in `dist/`)
+  per build, permanently in git history, paid by every clone forever, and the consumer
+  would have to reassemble a package from loose files.
+- **Actions artifacts** (what `build_and_test.yml` already uploads) — the download API
+  requires authentication and artifacts expire, so they are neither anonymous nor
+  durable.
+
 PGlite is a WASM Postgres build packaged into a TypeScript client library that enables you to run Postgres in the browser, Node.js, Bun and Deno, with no need to install any other dependencies. It is only 3mb gzipped and has support for many Postgres extensions, including [pgvector](https://github.com/pgvector/pgvector) and [PostGIS](https://postgis.net).
 
 ```javascript
