@@ -7,6 +7,9 @@ node_modules
 /packages/pglite/package-lock.json
 /packages/**/dist
 /build
+# Output of scripts/pack-pg19-release.sh — release assets are attached to a
+# GitHub Release, never committed.
+/release-dist
 /postgresql-*.tar.bz2
 /postgresql-*
 /postgresql

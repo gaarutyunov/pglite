@@ -1,0 +1,102 @@
+# Publishes a PG19 fork build of @electric-sql/pglite as a GitHub Release on
+# this fork, so downstream sites (gopgql docs) can install it over plain HTTPS
+# with no registry credentials. See README "PG19 fork builds".
+#
+# Manual only: the wasm build is expensive and a release is an intentional act.
+name: Publish PG19 build
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: 'Fork build number; the release is tagged pglite-v<pglite version>-pg19.<build number>'
+        required: true
+        default: '1'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-pg19-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build and publish the PG19 release
+    # Deliberately a GitHub-hosted runner. build_and_test.yml targets
+    # blacksmith-* labels inherited from upstream; this fork has no Blacksmith
+    # runners, so a job using those labels would queue forever here.
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      BUILD_CONFIG_FILE: postgres-pglite/.buildconfig
+      TZ: UTC
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      # The wasm build unpacks a large Docker image plus a full Postgres tree.
+      - name: Reclaim runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc || true
+          df -h /
+
+      - uses: pnpm/action-setup@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: pnpm
+
+      # Not --frozen-lockfile: matches build_and_test.yml's build-all job, the
+      # only job upstream runs `pnpm build:all` from.
+      - name: Install
+        run: pnpm install
+
+      - name: Build wasm and TypeScript packages
+        env:
+          PGSRC: ${{ github.workspace }}/postgres-pglite
+        run: pnpm build:all
+
+      - name: Pack the release tarball
+        id: pack
+        run: scripts/pack-pg19-release.sh "${{ inputs.build_number }}"
+
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.pack.outputs.tag }}
+          VERSION: ${{ steps.pack.outputs.version }}
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+          PG: ${{ steps.pack.outputs.postgres }}
+          PG_COMMIT: ${{ steps.pack.outputs.postgres_commit }}
+          SHA256: ${{ steps.pack.outputs.sha256 }}
+        run: |
+          cat >notes.md <<EOF
+          Build artifact of this fork — not an upstream PGlite release.
+
+          | | |
+          |---|---|
+          | package | \`@electric-sql/pglite@$VERSION\` |
+          | postgres | $PG |
+          | pglite commit | \`${{ github.sha }}\` |
+          | postgres-pglite | \`$PG_COMMIT\` |
+          | sha256 | \`$SHA256\` |
+
+          Install it as a URL dependency; \`npm install\` records the resolved
+          URL and an integrity hash in your lockfile, and \`npm ci\` then
+          reproduces exactly these bytes:
+
+          \`\`\`bash
+          npm install https://github.com/${{ github.repository }}/releases/download/$TAG/$TARBALL
+          \`\`\`
+          EOF
+          gh release create "$TAG" \
+            --target "${{ github.sha }}" \
+            --title "@electric-sql/pglite $VERSION (PG19 fork build)" \
+            --notes-file notes.md \
+            --prerelease \
+            release-dist/"$TARBALL" \
+            release-dist/SHA256SUMS \
+            release-dist/build-info.txt
