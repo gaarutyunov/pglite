@@ -54,10 +54,18 @@ jobs:
       - name: Install
         run: pnpm install
 
+      # build:all:ci is build:all with the wasm build throttled --- see the root
+      # package.json. build-pglite.sh runs `emmake make -j` with no job limit,
+      # which a 4-vCPU / 16 GB hosted runner cannot survive.
       - name: Build wasm and TypeScript packages
         env:
           PGSRC: ${{ github.workspace }}/postgres-pglite
-        run: pnpm build:all
+        run: pnpm build:all:ci
+
+      # Never publish an artifact that has not been booted --- see
+      # fork-rot-check.yml for why exit code 0 is not evidence here.
+      - name: SQL/PGQ smoke test
+        run: pnpm -C packages/pglite test:pgq
 
       - name: Pack the release tarball
         id: pack
